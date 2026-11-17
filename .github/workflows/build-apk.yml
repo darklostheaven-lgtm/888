@@ -1,4 +1,5 @@
 
+
 name: Build Android APK
 
 on:
@@ -12,49 +13,59 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-24.04
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Extract project ZIP
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p _project
-          mapfile -t archives < <(find . -maxdepth 1 -type f -iname '*.zip' -print)
-
-          if [ "${#archives[@]}" -ne 1 ]; then
-            echo "В корне должен находиться ровно один ZIP"
-            exit 1
-          fi
-
-          unzip -q "${archives[0]}" -d _project
-          PROJECT_DIR="$(find _project -type f \( -name settings.gradle -o -name settings.gradle.kts \) | head -n 1 | xargs -r dirname)"
-
-          if [ -z "$PROJECT_DIR" ]; then
-            echo "Файл settings.gradle не найден"
-            exit 1
-          fi
-
-          cp -a "$PROJECT_DIR"/. .
-
-      - name: Set up Java 17
-        uses: actions/setup-java@v4
+      - name: Setup Java
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
 
-      - name: Set up Gradle
+      - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: '8.9'
+
+      - name: Find and extract ZIP
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          ZIP_FILE=$(find . -type f -iname '*.zip' \
+            ! -path './.git/*' | head -n 1)
+
+          if [ -z "$ZIP_FILE" ]; then
+            echo "ERROR: ZIP archive not found"
+            exit 1
+          fi
+
+          echo "Found: $ZIP_FILE"
+
+          mkdir -p extracted
+          unzip -o "$ZIP_FILE" -d extracted
+
+          PROJECT_FILE=$(find extracted -type f \
+            \( -name settings.gradle \
+            -o -name settings.gradle.kts \) \
+            | head -n 1)
+
+          if [ -z "$PROJECT_FILE" ]; then
+            echo "ERROR: Gradle project not found"
+            exit 1
+          fi
+
+          PROJECT_DIR=$(dirname "$PROJECT_FILE")
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
 
       - name: Build APK
-        run: gradle --no-daemon :app:assembleDebug
+        run: |
+          cd "$PROJECT_DIR"
+          gradle --no-daemon assembleDebug
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: 2000-yardov-debug-apk
-          path: app/build/outputs/apk/debug/app-debug.apk
+          path: ${{ env.PROJECT_DIR }}/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
